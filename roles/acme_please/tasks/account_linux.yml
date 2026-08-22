@@ -18,7 +18,7 @@
              '--eab-hmac-key', acme_please_eab_hmac]
             if acme_please_eab_kid | length > 0 else []) }}
   register: _acme_please_reg
-  no_log: true
+  no_log: "{{ not acme_please_debug }}"
   changed_when: _acme_please_reg.rc == 0
 
 - name: Record the account state
@@ -35,3 +35,4 @@
     fail_msg: >-
       ACME account registration against {{ acme_please_directory }}
       failed{{ ' (EAB in use — verify kid/hmac with your CA)' if acme_please_eab_kid | length > 0 else '' }}.
+      {{ _acme_please_reg.stderr | default('') if acme_please_debug else '' }}

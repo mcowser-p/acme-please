@@ -43,5 +43,6 @@ acme_please_dns_cleanup_hook: ""     # optional matching cleanup hook
 acme_please_certs: []
 
 acme_please_report_file: ""
+acme_please_debug: false          # true = disable no_log (CI/test keys only)
 # NOTE: no client-update machinery here by design — fleet-medic keeps
 # clients current (dnf/apt natively; winget via its patch step).

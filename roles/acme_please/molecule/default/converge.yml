@@ -14,6 +14,7 @@
         acme_please_eab_hmac: zWNDZM6eQGHWpSRTPal5eIUYFTu7EajVIoguysqZ9wG44nMEtx3MUAsUDkMTQ12W
         acme_please_challenge: dns-01
         acme_please_dns_hook: /opt/dns-hook.sh
+        acme_please_debug: true
         acme_please_certs:
           - name: web
             domains: ["{{ inventory_hostname }}.test"]
@@ -42,7 +43,7 @@
         cmd: |
           set -o pipefail
           [ "$(stat -c %a {{ _key | quote }})" = "600" ] || { echo BAD_KEY_MODE; exit 1; }
-          openssl x509 -in {{ _cert | quote }} -noout -subject | grep -q '{{ inventory_hostname }}.test' || { echo BAD_SUBJECT; exit 1; }
+          openssl x509 -in {{ _cert | quote }} -noout -ext subjectAltName | grep -q '{{ inventory_hostname }}.test' || { echo BAD_SAN; exit 1; }
           a=$(openssl x509 -in {{ _cert | quote }} -noout -fingerprint)
           b=$(openssl pkcs12 -in /opt/web.p12 -passin pass:molecule -clcerts -nokeys 2>/dev/null | openssl x509 -noout -fingerprint)
           [ "$a" = "$b" ] || { echo P12_MISMATCH; exit 1; }
@@ -97,6 +98,7 @@
             acme_please_directory: https://pebble:14000/dir
             acme_please_eab_kid: kid-1
             acme_please_eab_hmac: aW52YWxpZC1obWFjLWtleS1mb3ItdGVzdGluZy1vbmx5LW5vdC1yZWFs
+            acme_please_debug: true
             acme_please_certs: []
 
         - name: The role failed to fail
