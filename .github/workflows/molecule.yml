@@ -54,6 +54,9 @@ jobs:
       - name: Install collection dependencies
         run: ansible-galaxy collection install -r requirements.yml
 
+      - name: Pre-create the pebble config mount (else docker roots it)
+        run: mkdir -p /tmp/acme-please-pebble && chmod 0777 /tmp/acme-please-pebble
+
       - name: Molecule test
         run: molecule test
         working-directory: roles/acme_please

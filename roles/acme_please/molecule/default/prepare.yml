@@ -4,10 +4,11 @@
   gather_facts: false
   tasks:
     - name: Pebble config directory
+      # pre-created by the workflow before docker can root-own it; local
+      # runs: mkdir -p /tmp/acme-please-pebble first
       ansible.builtin.file:
         path: /tmp/acme-please-pebble
         state: directory
-        mode: "0777"
 
     - name: Write the pebble EAB config
       ansible.builtin.copy:
