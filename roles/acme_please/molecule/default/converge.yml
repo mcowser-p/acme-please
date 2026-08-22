@@ -62,13 +62,15 @@
         fail_msg: "onboard: {{ _acme_please_ci_native.stdout }} / {{ _acme_please_ci_deploy.stdout }} / {{ acme_please_result | to_nice_json }}"
 
     - name: Force a renewal and prove the hook re-fires
+      throttle: 1   # five parallel renewals overwhelm pebble (nonce churn)
       ansible.builtin.shell:
         executable: /bin/bash
         cmd: |
           set -o pipefail
           before=$(wc -l < /var/lib/acme-please/web.deployed)
           rm -f /opt/reloaded
-          certbot renew --force-renewal --cert-name web >/dev/null 2>&1
+          certbot renew --force-renewal --cert-name web >/dev/null 2>&1 \
+            || { sleep 5; certbot renew --force-renewal --cert-name web >/dev/null 2>&1; }
           after=$(wc -l < /var/lib/acme-please/web.deployed)
           [ "$after" -gt "$before" ] || { echo HOOK_NOT_REFIRED; exit 1; }
           [ -f /opt/reloaded ] || { echo RELOAD_NOT_RERUN; exit 1; }
