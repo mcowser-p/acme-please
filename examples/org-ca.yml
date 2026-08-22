@@ -1,0 +1,9 @@
+---
+# Enterprise CA with External Account Binding (the default flow).
+acme_please_directory: https://acme.ca.example.com/directory
+acme_please_email: pki@example.com
+acme_please_eab_kid: "{{ vault_acme_eab_kid }}"
+acme_please_eab_hmac: "{{ vault_acme_eab_hmac }}"
+acme_please_ca_root: "{{ lookup('ansible.builtin.file', 'files/org-root.pem') }}"
+acme_please_challenge: dns-01
+acme_please_dns_hook: /opt/org/bin/acme-dns-hook   # MS DNS / custom updater

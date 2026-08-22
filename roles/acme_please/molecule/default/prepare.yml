@@ -1,0 +1,81 @@
+---
+- name: Prepare the pebble config on the controller
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Pebble config directory
+      ansible.builtin.file:
+        path: /tmp/acme-please-pebble
+        state: directory
+        mode: "0777"
+
+    - name: Write the pebble EAB config
+      ansible.builtin.copy:
+        dest: /tmp/acme-please-pebble/config.json
+        mode: "0644"
+        content: |
+          {
+            "pebble": {
+              "listenAddress": "0.0.0.0:14000",
+              "managementListenAddress": "0.0.0.0:15000",
+              "certificate": "test/certs/localhost/cert.pem",
+              "privateKey": "test/certs/localhost/key.pem",
+              "httpPort": 80,
+              "tlsPort": 443,
+              "ocspResponderURL": "",
+              "externalAccountBindingRequired": true,
+              "externalAccountMACKeys": {
+                "kid-1": "zWNDZM6eQGHWpSRTPal5eIUYFTu7EajVIoguysqZ9wG44nMEtx3MUAsUDkMTQ12W"
+              }
+            }
+          }
+
+    - name: Extract pebble's minica root for client trust
+      ansible.builtin.shell:
+        cmd: |
+          for i in $(seq 1 30); do
+            docker cp pebble:/test/certs/pebble.minica.pem /tmp/acme-please-pebble/minica.pem 2>/dev/null && break
+            sleep 2
+          done
+          test -s /tmp/acme-please-pebble/minica.pem
+      changed_when: true
+
+- name: Prepare the target hosts
+  hosts: all:!sidecar
+  gather_facts: false
+  tasks:
+    - name: Bootstrap python (stock ubuntu/al images)
+      ansible.builtin.raw: |
+        command -v python3 >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3) || dnf install -y -q python3
+      changed_when: false
+
+    - name: Gather facts now that python exists
+      ansible.builtin.setup:
+
+    - name: Refresh apt cache (debian family)
+      when: ansible_os_family == 'Debian'
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install curl for the dns hook
+      ansible.builtin.package:
+        name: curl
+      failed_when: false
+
+    - name: Install the pebble root for the clients
+      ansible.builtin.copy:
+        src: /tmp/acme-please-pebble/minica.pem
+        dest: /opt/pebble-root.pem
+        mode: "0644"
+
+    - name: Install the CI dns hook
+      ansible.builtin.copy:
+        src: dns-hook.sh
+        dest: /opt/dns-hook.sh
+        mode: "0755"
+
+    - name: Wait for pebble
+      ansible.builtin.wait_for:
+        host: pebble
+        port: 14000
+        timeout: 60

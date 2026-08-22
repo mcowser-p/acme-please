@@ -1,0 +1,8 @@
+---
+# ansible-playbook -i inventory mcowser_p.acme_please.onboard \
+#   -e @org-ca.yml -e @certs.yml
+- name: ACME, please
+  hosts: all
+  become: true
+  roles:
+    - role: mcowser_p.acme_please.acme_please

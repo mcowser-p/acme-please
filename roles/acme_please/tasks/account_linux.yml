@@ -1,0 +1,37 @@
+---
+- name: Check for an existing account
+  ansible.builtin.command:
+    argv: [certbot, show_account, --server, "{{ acme_please_directory }}"]
+  register: _acme_please_acct
+  changed_when: false
+  failed_when: false
+
+- name: Register the account
+  when: _acme_please_acct.rc != 0
+  ansible.builtin.command:
+    argv: >-
+      {{ ['certbot', 'register', '--non-interactive', '--agree-tos',
+          '--server', acme_please_directory]
+         + (['--email', acme_please_email] if acme_please_email | length > 0
+            else ['--register-unsafely-without-email'])
+         + (['--eab-kid', acme_please_eab_kid,
+             '--eab-hmac-key', acme_please_eab_hmac]
+            if acme_please_eab_kid | length > 0 else []) }}
+  register: _acme_please_reg
+  no_log: true
+  changed_when: _acme_please_reg.rc == 0
+
+- name: Record the account state
+  ansible.builtin.set_fact:
+    acme_please_result: >-
+      {{ acme_please_result
+         | combine({'account': 'registered'
+              if _acme_please_acct.rc == 0 or _acme_please_reg.rc | default(1) == 0
+              else 'registration FAILED — check the directory URL and EAB pair'}) }}
+
+- name: Fail clearly on a bad registration
+  ansible.builtin.assert:
+    that: _acme_please_acct.rc == 0 or _acme_please_reg.rc | default(1) == 0
+    fail_msg: >-
+      ACME account registration against {{ acme_please_directory }}
+      failed{{ ' (EAB in use — verify kid/hmac with your CA)' if acme_please_eab_kid | length > 0 else '' }}.

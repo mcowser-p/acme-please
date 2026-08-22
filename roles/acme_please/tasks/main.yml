@@ -1,0 +1,63 @@
+---
+- name: Validate inputs
+  ansible.builtin.assert:
+    that:
+      - acme_please_directory | length > 0
+      - (acme_please_eab_kid | length > 0) == (acme_please_eab_hmac | length > 0)
+      - acme_please_challenge in ['dns-01', 'http-01']
+    fail_msg: >-
+      acme_please_directory is required; eab_kid and eab_hmac must be
+      set together; challenge must be dns-01 or http-01.
+
+- name: Initialize the result
+  ansible.builtin.set_fact:
+    acme_please_result:
+      client: ""
+      account: ""
+      certs: []
+
+- name: Onboard (linux)
+  when: ansible_os_family != 'Windows'
+  block:
+    - name: Install the client
+      ansible.builtin.include_tasks: install_linux.yml
+
+    - name: Register the account
+      ansible.builtin.include_tasks: account_linux.yml
+
+    - name: Issue and deploy each certificate
+      ansible.builtin.include_tasks: issue_linux.yml
+      loop: "{{ acme_please_certs }}"
+      loop_control:
+        loop_var: _acme_please_cert
+        label: "{{ _acme_please_cert.name }}"
+
+- name: Onboard (windows)
+  when: ansible_os_family == 'Windows'
+  block:
+    - name: Install the client
+      ansible.builtin.include_tasks: install_windows.yml
+
+    - name: Issue and deploy each certificate
+      ansible.builtin.include_tasks: issue_windows.yml
+      loop: "{{ acme_please_certs }}"
+      loop_control:
+        loop_var: _acme_please_cert
+        label: "{{ _acme_please_cert.name }}"
+
+- name: Report
+  ansible.builtin.debug:
+    msg: |-
+      acme-please on {{ inventory_hostname }}:
+        client: {{ acme_please_result.client }}
+        account: {{ acme_please_result.account }}
+      {% for c in acme_please_result.certs %}
+        [{{ c.name }}] {{ c.status }} — {{ c.detail }}
+      {% endfor %}
+
+- name: Write the report file
+  when: acme_please_report_file | length > 0
+  ansible.builtin.copy:
+    content: "{{ acme_please_result | to_nice_yaml(indent=2) }}"
+    dest: "{{ acme_please_report_file }}"
+    mode: "0644"

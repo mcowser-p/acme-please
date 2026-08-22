@@ -1,0 +1,109 @@
+---
+- name: Converge
+  hosts: all:!sidecar
+  environment:
+    REQUESTS_CA_BUNDLE: /opt/pebble-root.pem
+  tasks:
+    - name: Full onboarding — EAB registration + dns-01 issuance + deploy
+      ansible.builtin.include_role:
+        name: acme_please
+      vars:
+        acme_please_directory: https://pebble:14000/dir
+        acme_please_email: ci@example.test
+        acme_please_eab_kid: kid-1
+        acme_please_eab_hmac: zWNDZM6eQGHWpSRTPal5eIUYFTu7EajVIoguysqZ9wG44nMEtx3MUAsUDkMTQ12W
+        acme_please_challenge: dns-01
+        acme_please_dns_hook: /opt/dns-hook.sh
+        acme_please_certs:
+          - name: web
+            domains: ["{{ inventory_hostname }}.test"]
+            deploy:
+              pkcs12: /opt/web.p12
+              pkcs12_passphrase: molecule
+              reload: "touch /opt/reloaded"
+
+    - name: Assert the client came from the native channel
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          if command -v rpm >/dev/null; then rpm -q certbot >/dev/null && echo NATIVE
+          else dpkg -s certbot >/dev/null 2>&1 && echo NATIVE; fi
+      register: _native
+      changed_when: false
+
+    - name: Assert issuance and deployment
+      vars:
+        _el: "{{ ansible_os_family == 'RedHat' }}"
+        _cert: "{{ '/etc/pki/tls/certs/web.crt' if _el else '/etc/ssl/certs/web.crt' }}"
+        _key: "{{ '/etc/pki/tls/private/web.key' if _el else '/etc/ssl/private/web.key' }}"
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          [ "$(stat -c %a {{ _key | quote }})" = "600" ] || { echo BAD_KEY_MODE; exit 1; }
+          openssl x509 -in {{ _cert | quote }} -noout -subject | grep -q '{{ inventory_hostname }}.test' || { echo BAD_SUBJECT; exit 1; }
+          a=$(openssl x509 -in {{ _cert | quote }} -noout -fingerprint)
+          b=$(openssl pkcs12 -in /opt/web.p12 -passin pass:molecule -clcerts -nokeys 2>/dev/null | openssl x509 -noout -fingerprint)
+          [ "$a" = "$b" ] || { echo P12_MISMATCH; exit 1; }
+          [ -f /opt/reloaded ] || { echo NO_RELOAD; exit 1; }
+          echo ALL_OK
+      register: _deploy_check
+      changed_when: false
+
+    - name: Confirm scenario health
+      ansible.builtin.assert:
+        that:
+          - "'NATIVE' in _native.stdout"
+          - "'ALL_OK' in _deploy_check.stdout"
+          - acme_please_result.account == 'registered'
+          - acme_please_result.certs | selectattr('status', 'eq', 'issued') | list | length == 1
+        fail_msg: "onboard: {{ _native.stdout }} / {{ _deploy_check.stdout }} / {{ acme_please_result | to_nice_json }}"
+
+    - name: Force a renewal and prove the hook re-fires
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          before=$(wc -l < /var/lib/acme-please/web.deployed)
+          rm -f /opt/reloaded
+          certbot renew --force-renewal --cert-name web >/dev/null 2>&1
+          after=$(wc -l < /var/lib/acme-please/web.deployed)
+          [ "$after" -gt "$before" ] || { echo HOOK_NOT_REFIRED; exit 1; }
+          [ -f /opt/reloaded ] || { echo RELOAD_NOT_RERUN; exit 1; }
+          echo RENEW_OK
+      register: _renew
+      changed_when: true
+      environment:
+        REQUESTS_CA_BUNDLE: /opt/pebble-root.pem
+
+    - name: Assert renewal behavior
+      ansible.builtin.assert:
+        that: "'RENEW_OK' in _renew.stdout"
+        fail_msg: "renew: {{ _renew.stdout }}"
+
+    - name: Negative — a wrong EAB HMAC must fail readably
+      when: inventory_hostname == 'acme-alma9'
+      block:
+        - name: Remove the account so registration re-runs
+          ansible.builtin.shell:
+            cmd: certbot unregister --server https://pebble:14000/dir --non-interactive >/dev/null 2>&1 || true; rm -rf /etc/letsencrypt/accounts
+          changed_when: true
+
+        - name: Attempt registration with a bad HMAC
+          ansible.builtin.include_role:
+            name: acme_please
+          vars:
+            acme_please_directory: https://pebble:14000/dir
+            acme_please_eab_kid: kid-1
+            acme_please_eab_hmac: aW52YWxpZC1obWFjLWtleS1mb3ItdGVzdGluZy1vbmx5LW5vdC1yZWFs
+            acme_please_certs: []
+
+        - name: The role failed to fail
+          ansible.builtin.fail:
+            msg: bad EAB was accepted
+      rescue:
+        - name: Confirm the failure was the registration assert
+          ansible.builtin.assert:
+            that: "'registration' in (ansible_failed_result.msg | default('')) or 'EAB' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "wrong failure: {{ ansible_failed_result.msg | default('?') }}"

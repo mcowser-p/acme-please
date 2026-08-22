@@ -1,0 +1,15 @@
+---
+acme_please_certs:
+  - name: web
+    domains: ["{{ ansible_fqdn }}"]
+    deploy:
+      reload: systemctl reload nginx        # matches the profile grant
+
+  - name: tomcat
+    domains: ["{{ ansible_fqdn }}"]
+    deploy:
+      pkcs12: /etc/tomcat/myapp.p12         # the TLS-doc keystore rebuild
+      pkcs12_passphrase: "{{ vault_keystore_pass }}"
+      owner: root
+      group: tomcat
+      reload: systemctl restart tomcat      # tomcat has no graceful reload

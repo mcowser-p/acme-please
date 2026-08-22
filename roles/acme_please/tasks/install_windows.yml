@@ -1,0 +1,60 @@
+---
+- name: Assert a supported Windows version
+  ansible.builtin.assert:
+    that: ansible_distribution_version is version('10.0.20348', '>=')
+    fail_msg: >-
+      acme-please supports Windows Server 2022+ only (winget is the
+      update channel and cannot run on 2019).
+
+- name: Check for winget
+  ansible.windows.win_shell: |
+    if (Get-Command winget -ErrorAction SilentlyContinue) { "present" } else { "absent" }
+  register: _acme_please_winget
+  changed_when: false
+
+- name: Bootstrap winget (fresh Server 2022 lacks it)
+  when: "'absent' in _acme_please_winget.stdout"
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $tmp = Join-Path $env:TEMP 'winget'
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $bundle = Join-Path $tmp 'AppInstaller.msixbundle'
+    Invoke-WebRequest -Uri 'https://aka.ms/getwinget' -OutFile $bundle
+    $vclibs = Join-Path $tmp 'VCLibs.appx'
+    Invoke-WebRequest -Uri 'https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx' -OutFile $vclibs
+    Add-AppxPackage -Path $vclibs -ErrorAction SilentlyContinue
+    Add-AppxPackage -Path $bundle
+    winget --version
+  register: _acme_please_winget_boot
+  changed_when: true
+
+- name: Install simple-acme via winget
+  ansible.windows.win_shell: |
+    winget install --id simple-acme.simple-acme --exact --silent `
+      --accept-source-agreements --accept-package-agreements --scope machine
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) { "ok" } else { "rc=$LASTEXITCODE" }
+    # -1978335189 = already installed / no applicable upgrade
+  register: _acme_please_sacme
+  changed_when: "'ok' in _acme_please_sacme.stdout"
+  failed_when: "'rc=' in _acme_please_sacme.stdout"
+
+- name: Record the client
+  ansible.builtin.set_fact:
+    acme_please_result: >-
+      {{ acme_please_result | combine({'client': 'simple-acme (winget)'}) }}
+
+- name: Trust the internal CA root
+  when: acme_please_ca_root | length > 0
+  block:
+    - name: Write the root PEM
+      ansible.windows.win_copy:
+        content: "{{ acme_please_ca_root }}"
+        dest: C:\ProgramData\acme-please\root.pem
+
+    - name: Import into LocalMachine Root
+      ansible.windows.win_shell: |
+        Import-Certificate -FilePath 'C:\ProgramData\acme-please\root.pem' `
+          -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+        "imported"
+      register: _acme_please_root
+      changed_when: true

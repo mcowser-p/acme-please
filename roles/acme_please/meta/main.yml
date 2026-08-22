@@ -1,0 +1,23 @@
+---
+galaxy_info:
+  namespace: mcowser_p
+  role_name: acme_please
+  author: mcowser-p
+  description: >-
+    ACME client onboarding and certificate lifecycle - natively packaged
+    clients (certbot, simple-acme via winget), enterprise EAB by
+    default, dns-01/http-01, canonical-path deployment with SELinux and
+    PKCS12 hooks, packaged renewal timers
+  license: Apache-2.0
+  min_ansible_version: '2.16'
+  platforms:
+    - name: EL
+      versions: ['9', '10']
+    - name: Ubuntu
+      versions: [jammy, noble]
+    - name: Amazon Linux
+      versions: ['2023']
+    - name: Windows
+      versions: ['2022']
+  galaxy_tags: [acme, certificates, tls, security, windows]
+dependencies: []

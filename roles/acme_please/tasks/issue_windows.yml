@@ -1,0 +1,50 @@
+---
+- name: "Locate the simple-acme executable"
+  ansible.windows.win_shell: |
+    $c = Get-Command wacs, simple-acme -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { $c.Source } else { "MISSING" }
+  register: _acme_please_exe
+  changed_when: false
+
+- name: "Fail when the client is missing"
+  ansible.builtin.assert:
+    that: "'MISSING' not in _acme_please_exe.stdout"
+    fail_msg: simple-acme executable not found after winget install
+
+- name: "Issue via simple-acme for {{ _acme_please_cert.name }}"
+  ansible.windows.win_shell: >-
+    & '{{ _acme_please_exe.stdout | trim }}'
+    --baseuri '{{ acme_please_directory }}'
+    {{ "--emailaddress '" ~ acme_please_email ~ "'" if acme_please_email | length > 0 else '' }}
+    {{ "--eab-key-identifier '" ~ acme_please_eab_kid ~ "' --eab-key '" ~ acme_please_eab_hmac ~ "'" if acme_please_eab_kid | length > 0 else '' }}
+    {% if _acme_please_cert.iis_site is defined %}
+    --source iis --host {{ _acme_please_cert.domains | join(',') }}
+    {% else %}
+    --source manual --host {{ _acme_please_cert.domains | join(',') }}
+    {% endif %}
+    {{ '--validation script --dnsscript "' ~ acme_please_dns_hook ~ '"' if acme_please_challenge == 'dns-01' and acme_please_dns_hook | length > 0 else '' }}
+    --friendlyname '{{ _acme_please_cert.name }}'
+    --accepttos --usedefaulttaskuser --nocache
+  register: _acme_please_wissue
+  no_log: "{{ acme_please_eab_kid | length > 0 }}"
+  changed_when: _acme_please_wissue.rc == 0
+  failed_when: false
+
+- name: "Assert the renewal task exists"
+  ansible.windows.win_shell: |
+    $t = Get-ScheduledTask | Where-Object TaskName -like '*win-acme*' -ErrorAction SilentlyContinue
+    if (-not $t) { $t = Get-ScheduledTask | Where-Object TaskName -like '*simple-acme*' }
+    if ($t) { "task: $($t[0].TaskName)" } else { "NOTASK" }
+  register: _acme_please_task
+  changed_when: false
+
+- name: "Record {{ _acme_please_cert.name }}"
+  ansible.builtin.set_fact:
+    acme_please_result: >-
+      {{ acme_please_result
+         | combine({'certs': acme_please_result.certs + [{
+              'name': _acme_please_cert.name,
+              'status': 'issued' if _acme_please_wissue.rc == 0 else 'fail',
+              'detail': ('renewal ' ~ (_acme_please_task.stdout | trim))
+                        if _acme_please_wissue.rc == 0
+                        else 'simple-acme rc=' ~ _acme_please_wissue.rc}]}) }}

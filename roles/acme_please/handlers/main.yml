@@ -1,0 +1,10 @@
+---
+- name: Update CA trust (el)
+  ansible.builtin.command:
+    argv: [update-ca-trust]
+  changed_when: true
+
+- name: Update CA trust (debian)
+  ansible.builtin.command:
+    argv: [update-ca-certificates]
+  changed_when: true

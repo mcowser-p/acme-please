@@ -1,0 +1,67 @@
+---
+driver:
+  name: docker
+platforms:
+  - name: acme-alma9
+    image: almalinux:9
+    pre_build_image: true
+    networks: [{name: acme-net}]
+  - name: acme-alma10
+    image: almalinux:10
+    pre_build_image: true
+    networks: [{name: acme-net}]
+  - name: acme-ubuntu2404
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    networks: [{name: acme-net}]
+  - name: acme-ubuntu2604
+    image: ubuntu:26.04
+    pre_build_image: true
+    command: sleep infinity
+    networks: [{name: acme-net}]
+  - name: acme-al2023
+    image: amazonlinux:2023
+    pre_build_image: true
+    command: sleep infinity
+    networks: [{name: acme-net}]
+  # pebble waits for the controller-written EAB config, then starts
+  - name: pebble
+    image: ghcr.io/letsencrypt/pebble:latest
+    pre_build_image: true
+    command: >-
+      sh -c 'while [ ! -f /pebble-cfg/config.json ]; do sleep 1; done;
+      pebble -config /pebble-cfg/config.json -dnsserver challtestsrv:8053'
+    networks: [{name: acme-net}]
+    groups: [sidecar]
+    volumes:
+      - /tmp/acme-please-pebble:/pebble-cfg
+  - name: challtestsrv
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
+    pre_build_image: true
+    command: pebble-challtestsrv -defaultIPv4 ""
+    networks: [{name: acme-net}]
+    groups: [sidecar]
+
+role_name_check: 1
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../../../requirements.yml
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - verify
+    - destroy
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: ../../../../roles
+  inventory:
+    host_vars:
+      pebble: {ansible_connection: local}
+      challtestsrv: {ansible_connection: local}

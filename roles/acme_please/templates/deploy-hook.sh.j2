@@ -1,0 +1,37 @@
+#!/bin/bash
+# acme-please deploy hook for {{ _acme_please_cert.name }} — runs on
+# every successful issuance/renewal (certbot deploy hook contract:
+# RENEWED_LINEAGE points at the live directory).
+set -euo pipefail
+LINEAGE="${RENEWED_LINEAGE:-/etc/letsencrypt/live/{{ _acme_please_cert.name }}}"
+
+install -m {{ _acme_please_deploy.mode_cert | default('0644') }} \
+  -o {{ _acme_please_deploy.owner | default('root') }} -g {{ _acme_please_deploy.group | default('root') }} \
+  "$LINEAGE/cert.pem" '{{ _acme_please_deploy.cert }}'
+install -m {{ _acme_please_deploy.mode_key | default('0600') }} \
+  -o {{ _acme_please_deploy.owner | default('root') }} -g {{ _acme_please_deploy.group | default('root') }} \
+  "$LINEAGE/privkey.pem" '{{ _acme_please_deploy.key }}'
+install -m {{ _acme_please_deploy.mode_cert | default('0644') }} \
+  -o {{ _acme_please_deploy.owner | default('root') }} -g {{ _acme_please_deploy.group | default('root') }} \
+  "$LINEAGE/chain.pem" '{{ _acme_please_deploy.chain }}'
+
+{% if _acme_please_selinux %}
+# key outside the standard dirs on an SELinux host: keep the cert_t
+# label the access-profiles TLS doc requires
+command -v restorecon >/dev/null && restorecon -F '{{ _acme_please_deploy.key }}' '{{ _acme_please_deploy.cert }}' || true
+{% endif %}
+
+{% if _acme_please_deploy.pkcs12 | default('') | length > 0 %}
+# the Tomcat rebuild — PEM into a PKCS12 keystore
+openssl pkcs12 -export -in "$LINEAGE/cert.pem" -inkey "$LINEAGE/privkey.pem" \
+  -certfile "$LINEAGE/chain.pem" -out '{{ _acme_please_deploy.pkcs12 }}' \
+  -passout 'pass:{{ _acme_please_deploy.pkcs12_passphrase | default("") }}'
+chmod 0640 '{{ _acme_please_deploy.pkcs12 }}'
+chown {{ _acme_please_deploy.owner | default('root') }}:{{ _acme_please_deploy.group | default('root') }} '{{ _acme_please_deploy.pkcs12 }}'
+{% endif %}
+
+date -u +%FT%TZ >> /var/lib/acme-please/{{ _acme_please_cert.name }}.deployed
+
+{% if _acme_please_deploy.reload | default('') | length > 0 %}
+{{ _acme_please_deploy.reload }}
+{% endif %}

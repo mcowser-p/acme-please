@@ -1,0 +1,48 @@
+---
+# Ansible Galaxy collection manifest for mcowser_p.acme_please.
+#
+# `version` is a placeholder — semantic-release stamps the released version
+# here at release time (see .releaserc.js). Do not bump it by hand.
+namespace: mcowser_p
+name: acme_please
+version: 0.0.0
+readme: README.md
+authors:
+  - mcowser-p
+description: >-
+  acme-please — ACME client onboarding and certificate lifecycle.
+  Installs natively-updatable clients (certbot from dnf/apt on
+  EL/Ubuntu/Amazon Linux, simple-acme via winget on Windows Server
+  2022+), registers against enterprise CAs with External Account
+  Binding by default (any RFC8555 directory supported, internal CAs
+  included), issues via dns-01 or http-01, deploys into the
+  access-profiles canonical paths with correct ownership and SELinux
+  labels, and wires renewal deploy-hooks (PKCS12 rebuilds and service
+  reloads included).
+license:
+  - Apache-2.0
+tags:
+  - acme
+  - certificates
+  - tls
+  - letsencrypt
+  - windows
+  - linux
+  - security
+dependencies:
+  ansible.windows: '>=2.0.0'
+repository: https://github.com/mcowser-p/acme-please
+homepage: https://github.com/mcowser-p/acme-please
+issues: https://github.com/mcowser-p/acme-please/issues
+build_ignore:
+  - .github
+  - .git
+  - .gitignore
+  - .releaserc.js
+  - .ansible-lint
+  - .yamllint
+  - package.json
+  - package-lock.json
+  - node_modules
+  - requirements.txt
+  - '*.tar.gz'

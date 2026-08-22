@@ -1,0 +1,84 @@
+---
+# One certificate: compute deploy targets, render the deploy hook,
+# issue via certbot, run the hook once immediately.
+
+- name: "Compute deploy targets for {{ _acme_please_cert.name }}"
+  vars:
+    _el: "{{ ansible_os_family == 'RedHat' }}"
+    _base_certs: "{{ '/etc/pki/tls/certs' if _el else '/etc/ssl/certs' }}"
+    _base_keys: "{{ '/etc/pki/tls/private' if _el else '/etc/ssl/private' }}"
+    _d: "{{ _acme_please_cert.deploy | default({}) }}"
+  ansible.builtin.set_fact:
+    _acme_please_deploy: >-
+      {{ _d | combine({
+           'cert': _d.cert | default(_base_certs ~ '/' ~ _acme_please_cert.name ~ '.crt'),
+           'key': _d.key | default(_base_keys ~ '/' ~ _acme_please_cert.name ~ '.key'),
+           'chain': _d.chain | default(_base_certs ~ '/' ~ _acme_please_cert.name ~ '-chain.crt')}) }}
+
+- name: "Decide SELinux handling for {{ _acme_please_cert.name }}"
+  ansible.builtin.set_fact:
+    _acme_please_selinux: >-
+      {{ ansible_selinux.status | default('disabled') == 'enabled'
+         and not _acme_please_deploy.key.startswith('/etc/pki/tls') }}
+
+- name: "Label a non-standard key path for {{ _acme_please_cert.name }}"
+  when: _acme_please_selinux
+  ansible.builtin.command:
+    argv: [semanage, fcontext, -a, -t, cert_t, "{{ _acme_please_deploy.key | dirname }}(/.*)?"]
+  register: _acme_please_fcontext
+  changed_when: _acme_please_fcontext.rc == 0
+  failed_when: false
+
+- name: "Prepare hook directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/letsencrypt/renewal-hooks/deploy
+    - /var/lib/acme-please
+
+- name: "Render the deploy hook for {{ _acme_please_cert.name }}"
+  ansible.builtin.template:
+    src: deploy-hook.sh.j2
+    dest: "/etc/letsencrypt/renewal-hooks/deploy/acme-please-{{ _acme_please_cert.name }}.sh"
+    mode: "0755"
+
+- name: "Issue the certificate for {{ _acme_please_cert.name }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ ['certbot', 'certonly', '--non-interactive', '--agree-tos',
+          '--server', acme_please_directory,
+          '--cert-name', _acme_please_cert.name,
+          '--key-type', _acme_please_cert.key_type | default('ecdsa'),
+          '--keep-until-expiring']
+         + (_acme_please_cert.domains | map('regex_replace', '^(.*)$', '-d,\1')
+            | map('split', ',') | flatten | list)
+         + ((['--dns-' ~ acme_please_dns_plugin | replace('dns-', ''),
+              '--dns-' ~ (acme_please_dns_plugin | replace('dns-', '')) ~ '-credentials',
+              '/etc/letsencrypt/acme-please-dns.ini']
+             if acme_please_dns_plugin | length > 0
+             else ['--manual', '--preferred-challenges', 'dns',
+                   '--manual-auth-hook', acme_please_dns_hook]
+                  + (['--manual-cleanup-hook', acme_please_dns_cleanup_hook]
+                     if acme_please_dns_cleanup_hook | length > 0 else []))
+            if acme_please_challenge == 'dns-01'
+            else ['--standalone']) }}
+  register: _acme_please_issue
+  changed_when: "'Certificate not yet due for renewal' not in _acme_please_issue.stdout"
+
+- name: "Deploy immediately for {{ _acme_please_cert.name }}"
+  ansible.builtin.command:
+    argv: ["/etc/letsencrypt/renewal-hooks/deploy/acme-please-{{ _acme_please_cert.name }}.sh"]
+  environment:
+    RENEWED_LINEAGE: "/etc/letsencrypt/live/{{ _acme_please_cert.name }}"
+  changed_when: true
+
+- name: "Record {{ _acme_please_cert.name }}"
+  ansible.builtin.set_fact:
+    acme_please_result: >-
+      {{ acme_please_result
+         | combine({'certs': acme_please_result.certs + [{
+              'name': _acme_please_cert.name, 'status': 'issued',
+              'detail': 'deployed to ' ~ _acme_please_deploy.cert
+                        ~ ' (key: ' ~ _acme_please_deploy.key ~ ')'}]}) }}

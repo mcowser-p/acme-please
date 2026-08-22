@@ -1,0 +1,47 @@
+---
+# defaults for mcowser_p.acme_please.acme_please
+# Enterprise-EAB-first: point acme_please_directory at your CA's ACME
+# endpoint and supply the EAB pair. Internal CAs (step-ca etc.) and
+# public directories (Let's Encrypt) work the same way — EAB vars just
+# stay empty. Clients are installed ONLY from native channels (dnf/apt,
+# winget) so fleet-medic's patch runs keep them updated.
+
+# --- CA / account ----------------------------------------------------------
+acme_please_directory: ""            # REQUIRED — the ACME directory URL
+acme_please_email: ""
+acme_please_eab_kid: ""              # External Account Binding key id
+acme_please_eab_hmac: ""             # EAB HMAC key (never logged)
+acme_please_ca_root: ""              # PEM content of an internal CA root to
+                                     # add to the OS trust store (optional)
+
+# --- challenge -------------------------------------------------------------
+acme_please_challenge: dns-01        # dns-01 | http-01
+acme_please_dns_plugin: ""           # certbot plugin (dns-route53,
+                                     # dns-rfc2136, ...) — installed as
+                                     # python3-certbot-<plugin> natively
+acme_please_dns_credentials: ""      # plugin credentials file CONTENT
+                                     # (templated to 0600, never logged)
+acme_please_dns_hook: ""             # OR path to a manual-auth-hook script
+                                     # (for DNS without a certbot plugin)
+acme_please_dns_cleanup_hook: ""     # optional matching cleanup hook
+
+# --- certificates ----------------------------------------------------------
+# Each item:
+#   name:      certbot cert-name / simple-acme friendly name
+#   domains:   [list of SANs]
+#   key_type:  ecdsa (default) | rsa
+#   deploy:    where the org expects the files (defaults follow the
+#              access-profiles TLS doc: /etc/pki/tls on EL and Amazon
+#              Linux, /etc/ssl on Ubuntu)
+#     cert / key / chain: target paths (computed when omitted)
+#     owner / group / mode_key: ownership (key defaults 0600 root)
+#     pkcs12: optional .p12 output (the Tomcat rebuild)
+#     pkcs12_passphrase: ""
+#     reload: command run after deploy (match the profile-granted one,
+#             e.g. "systemctl reload nginx")
+#   iis_site:  windows — site whose https binding simple-acme manages
+acme_please_certs: []
+
+acme_please_report_file: ""
+# NOTE: no client-update machinery here by design — fleet-medic keeps
+# clients current (dnf/apt natively; winget via its patch step).

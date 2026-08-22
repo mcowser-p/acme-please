@@ -1,0 +1,16 @@
+---
+- name: Windows acme-please over both transports
+  hosts: windows
+  tasks:
+    - name: Onboard the client (no issuance — no reachable CA in CI)
+      ansible.builtin.include_role:
+        name: acme_please
+      vars:
+        acme_please_directory: https://pebble.invalid/dir
+        acme_please_certs: []
+
+    - name: Assert the client landed via winget
+      ansible.builtin.assert:
+        that:
+          - "'simple-acme' in acme_please_result.client"
+        fail_msg: "{{ acme_please_result | to_nice_json }}"

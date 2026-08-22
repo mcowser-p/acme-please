@@ -1,0 +1,7 @@
+*.retry
+.cache/
+.venv/
+__pycache__/
+node_modules/
+package-lock.json
+mcowser_p-acme_please-*.tar.gz

@@ -1,0 +1,77 @@
+---
+# certbot from the NATIVE package channel only — never pip, never snap —
+# so ordinary patch runs keep it updated.
+
+- name: Enable EPEL (EL only — Amazon Linux ships certbot in base)
+  when:
+    - ansible_os_family == 'RedHat'
+    - ansible_distribution != 'Amazon'
+  ansible.builtin.package:
+    name: epel-release
+
+- name: Install certbot and the DNS plugin
+  ansible.builtin.package:
+    name: >-
+      {{ ['certbot']
+         + (['python3-certbot-' ~ acme_please_dns_plugin]
+            if acme_please_dns_plugin | length > 0 else []) }}
+
+- name: Record the client
+  ansible.builtin.command:
+    argv: [certbot, --version]
+  register: _acme_please_ver
+  changed_when: false
+
+- name: Note the client in the result
+  ansible.builtin.set_fact:
+    acme_please_result: >-
+      {{ acme_please_result
+         | combine({'client': _acme_please_ver.stdout | default('certbot') | trim}) }}
+
+- name: Trust the internal CA root (EL family)
+  when:
+    - acme_please_ca_root | length > 0
+    - ansible_os_family == 'RedHat'
+  ansible.builtin.copy:
+    content: "{{ acme_please_ca_root }}"
+    dest: /etc/pki/ca-trust/source/anchors/acme-please-root.pem
+    mode: "0644"
+  notify: Update CA trust (el)
+
+- name: Trust the internal CA root (Debian family)
+  when:
+    - acme_please_ca_root | length > 0
+    - ansible_os_family == 'Debian'
+  ansible.builtin.copy:
+    content: "{{ acme_please_ca_root }}"
+    dest: /usr/local/share/ca-certificates/acme-please-root.crt
+    mode: "0644"
+  notify: Update CA trust (debian)
+
+- name: Flush trust updates before registering
+  ansible.builtin.meta: flush_handlers
+
+- name: Write the DNS plugin credentials
+  when: acme_please_dns_credentials | length > 0
+  ansible.builtin.copy:
+    content: "{{ acme_please_dns_credentials }}"
+    dest: /etc/letsencrypt/acme-please-dns.ini
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Enable the packaged renewal timer
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      for t in certbot-renew.timer certbot.timer; do
+        if systemctl list-unit-files "$t" 2>/dev/null | grep -q "$t"; then
+          systemctl enable --now "$t" && echo "ENABLED=$t" && exit 0
+        fi
+      done
+      echo "ENABLED=none"
+  register: _acme_please_timer
+  changed_when: "'ENABLED=none' not in _acme_please_timer.stdout"
+  failed_when: false
