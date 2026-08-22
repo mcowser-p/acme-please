@@ -156,7 +156,7 @@ jobs:
           ansible_winrm_transport=basic
           ansible_winrm_server_cert_validation=ignore
           INV
-          ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-winrm.ini tests/windows/acme.yml || { echo "retrying after transport hiccup"; sleep 15; ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-winrm.ini tests/windows/medic.yml; }
+          ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-winrm.ini tests/windows/acme.yml || { echo "retrying after transport hiccup"; sleep 15; ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-winrm.ini tests/windows/acme.yml; }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WSLENV: ANSIBLE_TEST_PW/u:GITHUB_TOKEN/u
@@ -175,7 +175,7 @@ jobs:
           ansible_shell_type=powershell
           ansible_ssh_common_args=-o StrictHostKeyChecking=no
           INV
-          ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-ssh.ini tests/windows/acme.yml || { echo "retrying after transport hiccup"; sleep 15; ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-ssh.ini tests/windows/medic.yml; }
+          ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-ssh.ini tests/windows/acme.yml || { echo "retrying after transport hiccup"; sleep 15; ANSIBLE_ROLES_PATH=roles ~/venv/bin/ansible-playbook -i inventory-ssh.ini tests/windows/acme.yml; }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WSLENV: ANSIBLE_TEST_PW/u:GITHUB_TOKEN/u

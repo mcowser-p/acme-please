@@ -16,8 +16,9 @@
   when: "'absent' in _acme_please_winget.stdout"
   ansible.windows.win_shell: |
     $ErrorActionPreference = 'Stop'
-    # Microsoft's supported bootstrap — resolves the (ever-drifting)
-    # framework dependency chain itself
+    # The Microsoft-supported bootstrap resolves the framework
+    # dependency chain itself (no apostrophes here: win_shell free-form
+    # arg splitting chokes on unbalanced quotes)
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
     Install-Module Microsoft.WinGet.Client -Force -Scope AllUsers
