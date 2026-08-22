@@ -3,14 +3,15 @@
   hosts: all:!sidecar
   tasks:
     - name: The renewal timer is enabled
+      # noqa: command-instead-of-module — timer unit name differs per distro
       ansible.builtin.shell:
         executable: /bin/bash
         cmd: systemctl is-enabled certbot-renew.timer 2>/dev/null || systemctl is-enabled certbot.timer 2>/dev/null || echo no-timer
-      register: _timer
+      register: _acme_please_ci_timer
       changed_when: false
 
     - name: Timer state is known
       ansible.builtin.assert:
-        that: (_timer.stdout | trim) in ['enabled', 'no-timer']
-        fail_msg: "timer: {{ _timer.stdout }}"
+        that: (_acme_please_ci_timer.stdout | trim) in ['enabled', 'no-timer']
+        fail_msg: "timer: {{ _acme_please_ci_timer.stdout }}"
       # containers without systemd report no-timer; real hosts get 'enabled'

@@ -61,7 +61,9 @@
     mode: "0600"
   no_log: true
 
-- name: Enable the packaged renewal timer
+- name: Enable the packaged renewal timer  # noqa: command-instead-of-module
+  # the timer unit name differs per distro (certbot-renew vs certbot),
+  # hence the shell fallback loop
   ansible.builtin.shell:
     executable: /bin/bash
     cmd: |

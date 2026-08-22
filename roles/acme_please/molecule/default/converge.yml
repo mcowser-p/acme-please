@@ -29,7 +29,7 @@
           set -o pipefail
           if command -v rpm >/dev/null; then rpm -q certbot >/dev/null && echo NATIVE
           else dpkg -s certbot >/dev/null 2>&1 && echo NATIVE; fi
-      register: _native
+      register: _acme_please_ci_native
       changed_when: false
 
     - name: Assert issuance and deployment
@@ -48,17 +48,17 @@
           [ "$a" = "$b" ] || { echo P12_MISMATCH; exit 1; }
           [ -f /opt/reloaded ] || { echo NO_RELOAD; exit 1; }
           echo ALL_OK
-      register: _deploy_check
+      register: _acme_please_ci_deploy
       changed_when: false
 
     - name: Confirm scenario health
       ansible.builtin.assert:
         that:
-          - "'NATIVE' in _native.stdout"
-          - "'ALL_OK' in _deploy_check.stdout"
+          - "'NATIVE' in _acme_please_ci_native.stdout"
+          - "'ALL_OK' in _acme_please_ci_deploy.stdout"
           - acme_please_result.account == 'registered'
           - acme_please_result.certs | selectattr('status', 'eq', 'issued') | list | length == 1
-        fail_msg: "onboard: {{ _native.stdout }} / {{ _deploy_check.stdout }} / {{ acme_please_result | to_nice_json }}"
+        fail_msg: "onboard: {{ _acme_please_ci_native.stdout }} / {{ _acme_please_ci_deploy.stdout }} / {{ acme_please_result | to_nice_json }}"
 
     - name: Force a renewal and prove the hook re-fires
       ansible.builtin.shell:
@@ -72,15 +72,15 @@
           [ "$after" -gt "$before" ] || { echo HOOK_NOT_REFIRED; exit 1; }
           [ -f /opt/reloaded ] || { echo RELOAD_NOT_RERUN; exit 1; }
           echo RENEW_OK
-      register: _renew
+      register: _acme_please_ci_renew
       changed_when: true
       environment:
         REQUESTS_CA_BUNDLE: /opt/pebble-root.pem
 
     - name: Assert renewal behavior
       ansible.builtin.assert:
-        that: "'RENEW_OK' in _renew.stdout"
-        fail_msg: "renew: {{ _renew.stdout }}"
+        that: "'RENEW_OK' in _acme_please_ci_renew.stdout"
+        fail_msg: "renew: {{ _acme_please_ci_renew.stdout }}"
 
     - name: Negative — a wrong EAB HMAC must fail readably
       when: inventory_hostname == 'acme-alma9'
