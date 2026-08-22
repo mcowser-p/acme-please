@@ -54,8 +54,26 @@ jobs:
       - name: Install collection dependencies
         run: ansible-galaxy collection install -r requirements.yml
 
-      - name: Pre-create the pebble config mount (else docker roots it)
-        run: mkdir -p /tmp/acme-please-pebble && chmod 0777 /tmp/acme-please-pebble
+      - name: Pre-create the pebble config mount and config
+        run: |
+          mkdir -p /tmp/acme-please-pebble && chmod 0777 /tmp/acme-please-pebble
+          cat > /tmp/acme-please-pebble/config.json <<'CFG'
+          {
+            "pebble": {
+              "listenAddress": "0.0.0.0:14000",
+              "managementListenAddress": "0.0.0.0:15000",
+              "certificate": "test/certs/localhost/cert.pem",
+              "privateKey": "test/certs/localhost/key.pem",
+              "httpPort": 80,
+              "tlsPort": 443,
+              "ocspResponderURL": "",
+              "externalAccountBindingRequired": true,
+              "externalAccountMACKeys": {
+                "kid-1": "zWNDZM6eQGHWpSRTPal5eIUYFTu7EajVIoguysqZ9wG44nMEtx3MUAsUDkMTQ12W"
+              }
+            }
+          }
+          CFG
 
       - name: Molecule test
         run: molecule test
@@ -66,6 +84,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PY_COLORS: "1"
           ANSIBLE_FORCE_COLOR: "1"
+
+      - name: Sidecar logs on failure
+        if: failure()
+        run: |
+          docker ps -a | head
+          docker logs pebble 2>&1 | tail -30 || true
+          docker logs challtestsrv 2>&1 | tail -10 || true
 
   windows:
     runs-on: windows-latest

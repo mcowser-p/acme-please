@@ -28,9 +28,8 @@ platforms:
   - name: pebble
     image: ghcr.io/letsencrypt/pebble:latest
     pre_build_image: true
-    command: >-
-      sh -c 'while [ ! -f /pebble-cfg/config.json ]; do sleep 1; done;
-      pebble -config /pebble-cfg/config.json -dnsserver challtestsrv:8053'
+    # distroless image: command = args to the pebble entrypoint
+    command: -config /pebble-cfg/config.json -dnsserver challtestsrv:8053
     networks: [{name: acme-net}]
     groups: [sidecar]
     volumes:
@@ -38,7 +37,7 @@ platforms:
   - name: challtestsrv
     image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
     pre_build_image: true
-    command: pebble-challtestsrv -defaultIPv4 ""
+    command: -defaultIPv4 ""
     networks: [{name: acme-net}]
     groups: [sidecar]
 
