@@ -9,10 +9,12 @@
   ansible.builtin.package:
     name: epel-release
 
-- name: Install certbot and the DNS plugin
+- name: Install certbot, openssl, and the DNS plugin
+  # openssl backs the deploy hook (PKCS12 rebuilds) at renewal time —
+  # minimal images (alma10, AL2023) do not ship it
   ansible.builtin.package:
     name: >-
-      {{ ['certbot']
+      {{ ['certbot', 'openssl']
          + (['python3-certbot-' ~ acme_please_dns_plugin]
             if acme_please_dns_plugin | length > 0 else []) }}
 
