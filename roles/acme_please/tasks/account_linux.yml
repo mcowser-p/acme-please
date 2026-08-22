@@ -20,6 +20,7 @@
   register: _acme_please_reg
   no_log: "{{ not acme_please_debug }}"
   changed_when: _acme_please_reg.rc == 0
+  failed_when: false   # the assert below owns the failure message
 
 - name: Record the account state
   ansible.builtin.set_fact:
