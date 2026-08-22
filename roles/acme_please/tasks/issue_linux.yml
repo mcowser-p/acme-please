@@ -66,6 +66,11 @@
             else ['--standalone']) }}
   register: _acme_please_issue
   changed_when: "'Certificate not yet due for renewal' not in _acme_please_issue.stdout"
+  # busy CAs (and CI pebble under parallel load) surface transient
+  # bad-nonce errors — retry before declaring failure
+  retries: 2
+  delay: 5
+  until: _acme_please_issue.rc == 0
 
 - name: "Deploy immediately for {{ _acme_please_cert.name }}"
   ansible.builtin.command:
