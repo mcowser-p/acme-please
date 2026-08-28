@@ -54,10 +54,16 @@ acme_please_dns_cleanup_hook: ""     # optional matching cleanup hook
 #       && echo 'commit ssl cert /etc/haproxy/certs/web.pem'
 #       | socat stdio /run/haproxy/admin.sock
 #
-#   The runtime update is IN-MEMORY. It does not survive a restart, so the
-#   `combined` file above is not optional when using it -- the file is what
-#   HAProxy reads on the next start, and the API call is what makes the new
-#   certificate live without one.
+#   The runtime update is IN-MEMORY, measured rather than assumed: pushing a
+#   distinguishable certificate over the API swapped what HAProxy served with
+#   NO change of PID (a true in-process swap, not a reload), and a restart
+#   reverted to the on-disk file.
+#
+#   So `combined` is not optional when using the API -- the file is what
+#   HAProxy reads on the next start, the API call is what makes a renewed
+#   certificate live without one. A pipeline that only called the API would
+#   work until the next restart and then quietly serve the old certificate,
+#   and eventually an expired one.
 #     reload: command run after deploy (match the profile-granted one,
 #             e.g. "systemctl reload nginx")
 #   iis_site:  windows — site whose https binding simple-acme manages
