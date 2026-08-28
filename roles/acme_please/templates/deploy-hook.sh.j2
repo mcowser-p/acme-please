@@ -30,6 +30,29 @@ chmod 0640 '{{ _acme_please_deploy.pkcs12 }}'
 chown {{ _acme_please_deploy.owner | default('root') }}:{{ _acme_please_deploy.group | default('root') }} '{{ _acme_please_deploy.pkcs12 }}'
 {% endif %}
 
+{% if _acme_please_deploy.combined | default('') | length > 0 %}
+# HAProxy (and stunnel, and Postfix) want ONE file: the leaf, its
+# intermediates and the private key concatenated. Order is fullchain then
+# key, which is what every HAProxy example uses.
+#
+# umask 077 before the redirect, not chmod after it. `cat a b > dest`
+# creates dest with the ambient umask FIRST and writes the key into it, so a
+# chmod afterwards closes a window that has already been open -- briefly
+# world-readable, on a file that is mostly private key.
+(
+  umask 077
+  cat "$LINEAGE/fullchain.pem" "$LINEAGE/privkey.pem" > '{{ _acme_please_deploy.combined }}.tmp'
+)
+chown {{ _acme_please_deploy.owner | default('root') }}:{{ _acme_please_deploy.combined_group | default(_acme_please_deploy.group | default('root')) }} '{{ _acme_please_deploy.combined }}.tmp'
+chmod {{ _acme_please_deploy.combined_mode | default('0600') }} '{{ _acme_please_deploy.combined }}.tmp'
+# Rename last: HAProxy may be reading the live file, and a rename is atomic
+# where a partial write is a certificate that parses as garbage.
+mv -f '{{ _acme_please_deploy.combined }}.tmp' '{{ _acme_please_deploy.combined }}'
+{% if _acme_please_selinux %}
+command -v restorecon >/dev/null && restorecon -F '{{ _acme_please_deploy.combined }}' || true
+{% endif %}
+{% endif %}
+
 date -u +%FT%TZ >> /var/lib/acme-please/{{ _acme_please_cert.name }}.deployed
 
 {% if _acme_please_deploy.reload | default('') | length > 0 %}

@@ -37,6 +37,27 @@ acme_please_dns_cleanup_hook: ""     # optional matching cleanup hook
 #     owner / group / mode_key: ownership (key defaults 0600 root)
 #     pkcs12: optional .p12 output (the Tomcat rebuild)
 #     pkcs12_passphrase: ""
+#     combined: optional single-file PEM (fullchain + key), which is what
+#               HAProxy, stunnel and Postfix take instead of separate files.
+#               Defaults to 0600 root because the file CONTAINS the key --
+#               mode_cert would be wrong here and dangerously so.
+#     combined_mode / combined_group: override when the consumer runs
+#               unprivileged and needs group read
+#
+#   HAProxy note: `reload` does not have to be a reload. HAProxy can swap a
+#   certificate through its Runtime API without restarting, which matters
+#   because a reload is where it drops connections:
+#
+#     reload: >-
+#       printf 'set ssl cert /etc/haproxy/certs/web.pem <<\n%s\n\n'
+#       "$(cat /etc/haproxy/certs/web.pem)" | socat stdio /run/haproxy/admin.sock
+#       && echo 'commit ssl cert /etc/haproxy/certs/web.pem'
+#       | socat stdio /run/haproxy/admin.sock
+#
+#   The runtime update is IN-MEMORY. It does not survive a restart, so the
+#   `combined` file above is not optional when using it -- the file is what
+#   HAProxy reads on the next start, and the API call is what makes the new
+#   certificate live without one.
 #     reload: command run after deploy (match the profile-granted one,
 #             e.g. "systemctl reload nginx")
 #   iis_site:  windows — site whose https binding simple-acme manages
