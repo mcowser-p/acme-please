@@ -3,8 +3,14 @@
 # Enterprise-EAB-first: point acme_please_directory at your CA's ACME
 # endpoint and supply the EAB pair. Internal CAs (step-ca etc.) and
 # public directories (Let's Encrypt) work the same way — EAB vars just
-# stay empty. Clients are installed ONLY from native channels (dnf/apt,
-# winget) so fleet-medic's patch runs keep them updated.
+# stay empty. Clients are installed from native channels (dnf/apt, winget)
+# wherever one exists, so fleet-medic's patch runs keep them updated.
+#
+# Windows Server is the exception, and not by choice: it ships no App
+# Installer, so winget is absent and Microsoft's own
+# Repair-WinGetPackageManager cannot install it — it throws
+# TypeInitializationException. There is no native channel to use. See
+# acme_please_windows_client_source below.
 
 # --- CA / account ----------------------------------------------------------
 acme_please_directory: ""            # REQUIRED — the ACME directory URL
@@ -13,6 +19,35 @@ acme_please_eab_kid: ""              # External Account Binding key id
 acme_please_eab_hmac: ""             # EAB HMAC key (never logged)
 acme_please_ca_root: ""              # PEM content of an internal CA root to
                                      # add to the OS trust store (optional)
+
+# --- windows client channel ------------------------------------------------
+# auto        winget if the command already exists, else the release archive.
+#             This is the default because it is the only value that works on
+#             both a client SKU (winget present) and Windows Server (never).
+# winget      force winget, bootstrapping it if absent. The bootstrap is known
+#             to FAIL on Windows Server — kept for client SKUs and for anyone
+#             who has sideloaded App Installer themselves.
+# archive     force the pinned release archive, even where winget exists.
+# preinstalled  install nothing; assert wacs is already on the box.
+acme_please_windows_client_source: auto
+
+# The archive channel is a real tradeoff, stated rather than buried: a zip
+# extracted to Program Files is outside the patch channel, so nothing updates
+# it on its own and the version below is what stays installed until this value
+# changes. That is worse than winget and better than the alternative, which is
+# no ACME client on Windows Server at all.
+#
+# Pinned by version AND by hash. The URL alone is not a pin: a release asset
+# can be replaced in place, and this one is fetched over the internet onto a
+# host that is about to hold a private key.
+acme_please_simple_acme_version: "v2.4.0"
+acme_please_simple_acme_build: "2350"
+acme_please_simple_acme_sha256: "680eb42807b5599296b748a98d079d44574458f1b5846faee86957b789e1c382"
+acme_please_simple_acme_url: >-
+  https://github.com/simple-acme/simple-acme/releases/download/{{ acme_please_simple_acme_version }}/simple-acme.{{ acme_please_simple_acme_version }}.{{ acme_please_simple_acme_build }}.win-x64.pluggable.zip
+# pluggable, not trimmed: the trimmed build cannot load external plugins, and
+# dropping that capability to save disk is not a trade worth making silently.
+acme_please_simple_acme_dir: 'C:\Program Files\simple-acme'
 
 # --- challenge -------------------------------------------------------------
 acme_please_challenge: dns-01        # dns-01 | http-01

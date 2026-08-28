@@ -1,32 +1,102 @@
 ---
+# PATH first, then the archive channel's directory. The fallback is not
+# defensive padding: a machine PATH entry is read at process start, so the
+# service running this play cannot see one added moments earlier in
+# install_windows.yml. Trusting PATH alone means the archive channel installs
+# correctly and then reports the client missing.
 - name: "Locate the simple-acme executable"
   ansible.windows.win_shell: |
     $c = Get-Command wacs, simple-acme -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($c) { $c.Source } else { "MISSING" }
+    if ($c) { $c.Source }
+    else {
+      $p = Join-Path '{{ acme_please_simple_acme_dir }}' 'wacs.exe'
+      if (Test-Path $p) { $p } else { "MISSING" }
+    }
   register: _acme_please_exe
   changed_when: false
 
 - name: "Fail when the client is missing"
   ansible.builtin.assert:
     that: "'MISSING' not in _acme_please_exe.stdout"
-    fail_msg: simple-acme executable not found after winget install
+    fail_msg: >-
+      simple-acme is not on PATH and is not at
+      {{ acme_please_simple_acme_dir }}\wacs.exe. Check which channel
+      install_windows.yml chose -- acme_please_result.client records it.
 
+# simple-acme's installation plugin takes a numeric site id, while a cert
+# declares iis_site by NAME because that is what a human knows. Resolve it
+# here, and fail with the list of sites that do exist rather than letting
+# simple-acme report a binding problem for a site that was never found.
+- name: "Resolve the IIS site id for {{ _acme_please_cert.name }}"
+  when: _acme_please_cert.iis_site is defined
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
+    $want = '{{ _acme_please_cert.iis_site }}'
+    if ($want -match '^\d+$') { $want; exit 0 }
+    $s = Get-Website | Where-Object Name -eq $want
+    if ($s) { $s.Id } else { "NOSITE: have " + ((Get-Website).Name -join ',') }
+  register: _acme_please_siteid
+  changed_when: false
+
+- name: "The declared IIS site exists"
+  when: _acme_please_cert.iis_site is defined
+  ansible.builtin.assert:
+    that: "'NOSITE' not in _acme_please_siteid.stdout"
+    fail_msg: >-
+      iis_site '{{ _acme_please_cert.iis_site }}' is not an IIS site on
+      {{ inventory_hostname }} -- {{ _acme_please_siteid.stdout | trim }}.
+
+# --dnsscript was win-acme's spelling and does not exist in simple-acme:
+# `wacs.exe --help` on v2.4.0 lists --validationscript and no --dnsscript at
+# all. simple-acme does not reject the unknown argument outright, so the old
+# flag produced a run that silently ignored the hook and then failed for a
+# reason that had nothing to do with the flag.
+#
+# --validationmode is named explicitly because HTTP-01 is the documented
+# default: asking for the script plugin without setting the mode leaves the
+# client validating over HTTP while the caller asked for DNS.
+#
+# --usedefaulttaskuser is also gone: v2.4.0 offers --setuptaskscheduler and
+# --notaskscheduler instead. It matters which one is used -- the renewal task
+# is asserted below, so suppressing the scheduler would issue a certificate
+# that never renews. simple-acme responds to an unknown argument by printing
+# its usage banner and exiting 1, which is why the failure looked like a
+# generic "exited 1" rather than naming the flag.
+#
+# The source is ALWAYS manual, even for IIS. `--source iis` asks simple-acme
+# to find an existing binding carrying the requested host name and renew that
+# -- which is a chicken-and-egg on any host that has never had TLS:
+#
+#   Binding web-iis.lab.internal not found
+#   Source plugin IIS bindings was unable to generate options
+#
+# The site here has one binding, `http *:80:`, with no host header, so there
+# is nothing for that plugin to match. Manual source names the certificate and
+# `--installation iis` creates the https binding, which is what first issuance
+# actually needs. --source iis remains the right choice for adopting bindings
+# that already exist; it is the wrong default for a lab that starts from none.
+#
+# Keep prose OUT of the command scalar below. A Jinja comment inside a folded
+# win_shell block is folded into the argument string, and win_shell's
+# free-form splitter then reports "unbalanced jinja2 block or quotes" against
+# a template that is perfectly well formed.
 - name: "Issue via simple-acme for {{ _acme_please_cert.name }}"
   ansible.windows.win_shell: >-
     & '{{ _acme_please_exe.stdout | trim }}'
     --baseuri '{{ acme_please_directory }}'
     {{ "--emailaddress '" ~ acme_please_email ~ "'" if acme_please_email | length > 0 else '' }}
     {{ "--eab-key-identifier '" ~ acme_please_eab_kid ~ "' --eab-key '" ~ acme_please_eab_hmac ~ "'" if acme_please_eab_kid | length > 0 else '' }}
-    {% if _acme_please_cert.iis_site is defined %}
-    --source iis --host {{ _acme_please_cert.domains | join(',') }}
-    {% else %}
     --source manual --host {{ _acme_please_cert.domains | join(',') }}
-    {% endif %}
-    {{ '--validation script --dnsscript "' ~ acme_please_dns_hook ~ '"' if acme_please_challenge == 'dns-01' and acme_please_dns_hook | length > 0 else '' }}
+    {{ '--installation iis --installationsiteid ' ~ (_acme_please_siteid.stdout | trim) if _acme_please_cert.iis_site is defined else '' }}
+    {{ '--validationmode dns-01 --validation script --validationscript "' ~ acme_please_dns_hook ~ '"' if acme_please_challenge == 'dns-01' and acme_please_dns_hook | length > 0 else '' }}
     --friendlyname '{{ _acme_please_cert.name }}'
-    --accepttos --usedefaulttaskuser --nocache
+    --accepttos --setuptaskscheduler --nocache
   register: _acme_please_wissue
-  no_log: "{{ acme_please_eab_kid | length > 0 }}"
+  # Honours acme_please_debug, which defaults/main.yml documents as "true =
+  # disable no_log" -- it did not, on this path only. account_linux.yml has
+  # always consulted it. The escape hatch was missing from the one path with
+  # no other way to see why issuance failed.
+  no_log: "{{ (acme_please_eab_kid | length > 0) and not acme_please_debug }}"
   changed_when: _acme_please_wissue.rc == 0
   failed_when: false
 
@@ -48,3 +118,23 @@
               'detail': ('renewal ' ~ (_acme_please_task.stdout | trim))
                         if _acme_please_wissue.rc == 0
                         else 'simple-acme rc=' ~ _acme_please_wissue.rc}]}) }}
+
+# `failed_when: false` above is deliberate -- the result has to be recorded
+# before the play stops, or a failure reports nothing at all. But recording is
+# not reporting: without this assert a failed issuance writes status 'fail'
+# and the play still passes green, which is the failure mode the Linux path
+# already guards against and this one did not.
+#
+# no_log hides the reason whenever EAB is in use, so the message says how to
+# get it back rather than leaving the operator with a bare return code.
+- name: "Issuance actually succeeded for {{ _acme_please_cert.name }}"
+  ansible.builtin.assert:
+    that: _acme_please_wissue.rc == 0
+    fail_msg: >-
+      simple-acme exited {{ _acme_please_wissue.rc }} for
+      {{ _acme_please_cert.name }} ({{ _acme_please_cert.domains | join(',') }}).
+      {{ 'Output is suppressed because an EAB key is set -- re-run with
+         acme_please_debug=true to see it.'
+         if (acme_please_eab_kid | length > 0) and not acme_please_debug
+         else _acme_please_wissue.stdout | default('') | trim }}
+    quiet: true

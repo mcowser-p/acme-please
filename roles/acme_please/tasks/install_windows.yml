@@ -3,44 +3,136 @@
   ansible.builtin.assert:
     that: ansible_distribution_version is version('10.0.20348', '>=')
     fail_msg: >-
-      acme-please supports Windows Server 2022+ only (winget is the
-      update channel and cannot run on 2019).
+      acme-please supports Windows Server 2022+ only. The floor is the OS, not
+      the install channel -- simple-acme targets a .NET runtime 2019 does not
+      carry, and neither channel below changes that.
 
-- name: Check for winget
+# The channel is decided ONCE, here, from what is actually on the box -- not
+# re-inferred by each task. The previous shape asked "is winget absent?" and,
+# if so, tried to install it. On Windows Server the answer is always "absent"
+# and the repair always fails, so the only platform this role claimed to
+# support was the one platform it could not install on.
+- name: Look at what the host already has
   ansible.windows.win_shell: |
-    if (Get-Command winget -ErrorAction SilentlyContinue) { "present" } else { "absent" }
-  register: _acme_please_winget
+    $winget = [bool](Get-Command winget -ErrorAction SilentlyContinue)
+    $wacs   = [bool](Get-Command wacs, simple-acme -ErrorAction SilentlyContinue)
+    $onDisk = Test-Path (Join-Path '{{ acme_please_simple_acme_dir }}' 'wacs.exe')
+    "winget=$winget wacs=$($wacs -or $onDisk)"
+  register: _acme_please_win_probe
   changed_when: false
 
-- name: Bootstrap winget (fresh Server 2022 lacks it)
-  when: "'absent' in _acme_please_winget.stdout"
-  ansible.windows.win_shell: |
-    $ErrorActionPreference = 'Stop'
-    # The Microsoft-supported bootstrap resolves the framework
-    # dependency chain itself (no apostrophes here: win_shell free-form
-    # arg splitting chokes on unbalanced quotes)
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-    Install-Module Microsoft.WinGet.Client -Force -Scope AllUsers
-    Repair-WinGetPackageManager -AllUsers -Force -Latest
-    winget --version
-  register: _acme_please_winget_boot
-  changed_when: true
+- name: Choose the install channel
+  ansible.builtin.set_fact:
+    # auto deliberately does NOT attempt the winget bootstrap. That bootstrap
+    # exists for "fresh Server 2022 lacks winget" -- which is exactly the case
+    # it cannot fix, because Server ships no App Installer and
+    # Repair-WinGetPackageManager throws TypeInitializationException. Choosing
+    # winget only when the command is ALREADY there makes auto predictable: a
+    # client SKU keeps the patch channel, Server gets a client that works.
+    _acme_please_channel: >-
+      {{ acme_please_windows_client_source
+         if acme_please_windows_client_source != 'auto'
+         else ('winget' if 'winget=True' in _acme_please_win_probe.stdout
+               else 'archive') }}
 
-- name: Install simple-acme via winget
-  ansible.windows.win_shell: |
-    winget install --id simple-acme.simple-acme --exact --silent `
-      --accept-source-agreements --accept-package-agreements --scope machine
-    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) { "ok" } else { "rc=$LASTEXITCODE" }
-    # -1978335189 = already installed / no applicable upgrade
-  register: _acme_please_sacme
-  changed_when: "'ok' in _acme_please_sacme.stdout"
-  failed_when: "'rc=' in _acme_please_sacme.stdout"
+- name: The client is already present
+  when: _acme_please_channel == 'preinstalled'
+  ansible.builtin.assert:
+    that: "'wacs=True' in _acme_please_win_probe.stdout"
+    fail_msg: >-
+      acme_please_windows_client_source is 'preinstalled', but neither wacs nor
+      simple-acme is on PATH and {{ acme_please_simple_acme_dir }}\wacs.exe
+      does not exist. Install it, or use 'auto'.
+
+- name: Install simple-acme through winget
+  when: _acme_please_channel == 'winget'
+  block:
+    # Reachable only when the operator asked for winget explicitly (when winget
+    # already exists, the inner condition skips this). Kept for client SKUs and
+    # for anyone who has sideloaded App Installer themselves. It does not work
+    # on Windows Server.
+    - name: Bootstrap winget
+      when: "'winget=False' in _acme_please_win_probe.stdout"
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'Stop'
+        # The Microsoft-supported bootstrap resolves the framework
+        # dependency chain itself (no apostrophes here: win_shell free-form
+        # arg splitting chokes on unbalanced quotes)
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module Microsoft.WinGet.Client -Force -Scope AllUsers
+        Repair-WinGetPackageManager -AllUsers -Force -Latest
+        winget --version
+      register: _acme_please_winget_boot
+      changed_when: true
+
+    - name: Install simple-acme via winget
+      ansible.windows.win_shell: |
+        winget install --id simple-acme.simple-acme --exact --silent `
+          --accept-source-agreements --accept-package-agreements --scope machine
+        if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) { "ok" } else { "rc=$LASTEXITCODE" }
+        # -1978335189 = already installed / no applicable upgrade
+      register: _acme_please_sacme
+      changed_when: "'ok' in _acme_please_sacme.stdout"
+      failed_when: "'rc=' in _acme_please_sacme.stdout"
+
+- name: Install simple-acme from the pinned release archive
+  when: _acme_please_channel == 'archive'
+  block:
+    - name: Create the install directory
+      ansible.windows.win_file:
+        path: "{{ acme_please_simple_acme_dir }}"
+        state: directory
+
+    # The checksum is not belt-and-braces. A GitHub release asset can be
+    # replaced in place under the same tag and URL, and this archive is fetched
+    # over the internet onto a host that is about to hold a private key.
+    # Without the hash, the version pin is a suggestion.
+    - name: Fetch the release archive
+      ansible.windows.win_get_url:
+        url: "{{ acme_please_simple_acme_url }}"
+        dest: "{{ acme_please_simple_acme_dir }}\\simple-acme.zip"
+        checksum: "{{ acme_please_simple_acme_sha256 }}"
+        checksum_algorithm: sha256
+        force: false
+
+    # Expand-Archive rather than community.windows.win_unzip, so the role keeps
+    # its single ansible.windows dependency. `creates` makes it idempotent;
+    # -Force lets a version bump overwrite instead of failing halfway through.
+    - name: Extract the archive
+      ansible.windows.win_shell: >-
+        Expand-Archive -LiteralPath '{{ acme_please_simple_acme_dir }}\simple-acme.zip'
+        -DestinationPath '{{ acme_please_simple_acme_dir }}' -Force
+      args:
+        creates: "{{ acme_please_simple_acme_dir }}\\wacs.exe"
+
+    # A machine PATH change is read at process start, so the service running
+    # this play will not see it and neither will the next task. This entry is
+    # for a human on the box later; issue_windows.yml does not depend on it.
+    - name: Put simple-acme on the machine PATH
+      ansible.windows.win_path:
+        elements: "{{ acme_please_simple_acme_dir }}"
+        scope: machine
+
+    - name: The extracted client runs
+      ansible.windows.win_shell: >-
+        & '{{ acme_please_simple_acme_dir }}\wacs.exe' --version
+      register: _acme_please_archive_check
+      changed_when: false
 
 - name: Record the client
   ansible.builtin.set_fact:
     acme_please_result: >-
-      {{ acme_please_result | combine({'client': 'simple-acme (winget)'}) }}
+      {{ acme_please_result | combine({'client': _acme_please_client_label}) }}
+  vars:
+    # The channel is part of the answer, not decoration: an archive install
+    # sits outside the patch channel, and a report saying only "simple-acme"
+    # hides which hosts need updating by hand.
+    _acme_please_client_label: >-
+      {{ 'simple-acme (winget)' if _acme_please_channel == 'winget'
+         else 'simple-acme (archive ' ~ acme_please_simple_acme_version ~ ')'
+              if _acme_please_channel == 'archive'
+         else 'simple-acme (preinstalled)' }}
 
 - name: Trust the internal CA root
   when: acme_please_ca_root | length > 0
